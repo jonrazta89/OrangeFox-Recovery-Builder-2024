@@ -1,0 +1,159 @@
+diff --git a/BoardConfig.mk b/BoardConfig.mk
+index 6fe222f..203e585 100644
+--- a/BoardConfig.mk
++++ b/BoardConfig.mk
+@@ -17,8 +17,14 @@ AB_OTA_PARTITIONS += \
+     product \
+     system_ext \
+     vendor \
+-    odm
+-BOARD_USES_RECOVERY_AS_BOOT := true
++    odm \
++    vendor_dlkm \
++    odm_dlkm \
++    boot \
++    vendor_boot \
++    dtbo
++
++BOARD_USES_RECOVERY_AS_BOOT := false
+ 
+ # Architecture
+ TARGET_ARCH := arm64
+@@ -56,20 +62,21 @@ TARGET_KERNEL_SOURCE := kernel/motorola/fogona
+ TARGET_FORCE_PREBUILT_KERNEL := true
+ ifeq ($(TARGET_FORCE_PREBUILT_KERNEL),true)
+ TARGET_PREBUILT_KERNEL := $(DEVICE_PATH)/prebuilt/kernel
++BOARD_PREBUILT_DTBOIMAGE := $(DEVICE_PATH)/prebuilt/dtbo.img
+ endif
+ 
+ # Partitions
+ BOARD_BOOTIMAGE_PARTITION_SIZE := 104857600
+-BOARD_RECOVERYIMAGE_PARTITION_SIZE := 104857600
++BOARD_VENDOR_BOOTIMAGE_PARTITION_SIZE := 104857600
+ BOARD_HAS_LARGE_FILESYSTEM := true
+ BOARD_SYSTEMIMAGE_PARTITION_TYPE := ext4
+-BOARD_USERDATAIMAGE_FILE_SYSTEM_TYPE := ext4
++BOARD_USERDATAIMAGE_FILE_SYSTEM_TYPE := f2fs
+ BOARD_VENDORIMAGE_FILE_SYSTEM_TYPE := ext4
+ TARGET_COPY_OUT_VENDOR := vendor
+-BOARD_SUPER_PARTITION_SIZE := 9126805504 # TODO: Fix hardcoded value
++BOARD_SUPER_PARTITION_SIZE := 9126805504
+ BOARD_SUPER_PARTITION_GROUPS := motorola_dynamic_partitions
+-BOARD_MOTOROLA_DYNAMIC_PARTITIONS_PARTITION_LIST := system system_ext vendor odm product
+-BOARD_MOTOROLA_DYNAMIC_PARTITIONS_SIZE := 9122611200 # TODO: Fix hardcoded value
++BOARD_MOTOROLA_DYNAMIC_PARTITIONS_PARTITION_LIST := system system_ext vendor odm product vendor_dlkm odm_dlkm
++BOARD_MOTOROLA_DYNAMIC_PARTITIONS_SIZE := 9122611200
+ 
+ # Platform
+ TARGET_BOARD_PLATFORM := bengal
+@@ -80,21 +87,29 @@ TARGET_USERIMAGES_USE_EXT4 := true
+ TARGET_USERIMAGES_USE_F2FS := true
+ 
+ # Security patch level
+-VENDOR_SECURITY_PATCH := 2021-08-01
++VENDOR_SECURITY_PATCH := 2099-12-31
++PLATFORM_SECURITY_PATCH := 2099-12-31
++PLATFORM_VERSION := 16.1.0
+ 
+ # Verified Boot
+ BOARD_AVB_ENABLE := true
+ BOARD_AVB_MAKE_VBMETA_IMAGE_ARGS += --flags 3
+ 
+-# Hack: prevent anti rollback
+-PLATFORM_SECURITY_PATCH := 2099-12-31
+-VENDOR_SECURITY_PATCH := 2099-12-31
+-PLATFORM_VERSION := 16.1.0
+-
+-# TWRP Configuration
++# TWRP / Touch Configuration
+ TW_THEME := portrait_hdpi
+ TW_EXTRA_LANGUAGES := true
+ TW_SCREEN_BLANK_ON_BOOT := true
+ TW_INPUT_BLACKLIST := "hbtp_vm"
+ TW_USE_TOOLBOX := true
+ TW_INCLUDE_REPACKTOOLS := true
++
++# Load vendor and vendor_boot kernel modules for Touch (Ilitek / Focaltech / Goodix)
++TW_LOAD_VENDOR_BOOT_MODULES := true
++TW_LOAD_VENDOR_MODULES := true
++
++# OrangeFox Configuration
++FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER := 1
++OF_USE_GREEN_LED := 0
++OF_FLASHLIGHT_ENABLE := 0
++OF_ALLOW_DISABLE_NAVBAR := 0
++OF_QUICK_BACKUP_LIST := "/boot;/data;/system_image;/vendor_image;"
+diff --git a/recovery.fstab b/recovery.fstab
+index 1dcbcd0..5fd0cf8 100644
+--- a/recovery.fstab
++++ b/recovery.fstab
+@@ -3,8 +3,17 @@
+ /vendor         ext4     vendor                                     flags=display=vendor;logical;slotselect
+ /odm            ext4     odm                                        flags=display=odm;logical;slotselect
+ /product        ext4     product                                    flags=display=product;logical;slotselect
+-/data           f2fs     /dev/block/bootdevice/by-name/userdata     flags=display=data
++/vendor_dlkm    ext4     vendor_dlkm                                flags=display=vendor_dlkm;logical;slotselect
++/odm_dlkm       ext4     odm_dlkm                                   flags=display=odm_dlkm;logical;slotselect
++
++# Userdata and Internal Partitions
++/data           f2fs     /dev/block/bootdevice/by-name/userdata     flags=display=data;fileencryption=ice:aes-256-cts;wrappedkey;keydirectory=/metadata/vold/metadata_encryption
+ /metadata       f2fs     /dev/block/bootdevice/by-name/metadata     flags=display=metadata
+-/sdcard         vfat     /dev/block/mmcblk1p1                       flags=display=sdcard
+-/boot           emmc     /dev/block/bootdevice/by-name/boot         flags=display=boot
++/boot           emmc     /dev/block/bootdevice/by-name/boot         flags=display=boot;backup=1;flashimg=1;slotselect
++/vendor_boot    emmc     /dev/block/bootdevice/by-name/vendor_boot  flags=display=vendor_boot;backup=1;flashimg=1;slotselect
++/dtbo           emmc     /dev/block/bootdevice/by-name/dtbo         flags=display=dtbo;backup=1;flashimg=1;slotselect
+ /misc           emmc     /dev/block/bootdevice/by-name/misc         flags=display=misc
++
++# External Storage
++/sdcard         vfat     /dev/block/mmcblk1p1                       flags=display="MicroSD Card";storage;wipeingui;removable
++/usb_otg        vfat     /dev/block/sdg1        /dev/block/sdg      flags=fsflags=utf8;display="USB Storage";storage;wipeingui;removable
+diff --git a/recovery/root/init.recovery.qcom.rc b/recovery/root/init.recovery.qcom.rc
+index 471f210..433c018 100644
+--- a/recovery/root/init.recovery.qcom.rc
++++ b/recovery/root/init.recovery.qcom.rc
+@@ -1,31 +1,8 @@
+ # Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
+ #
+-# Redistribution and use in source and binary forms, with or without
+-# modification, are permitted provided that the following conditions are met:
+-#     * Redistributions of source code must retain the above copyright
+-#       notice, this list of conditions and the following disclaimer.
+-#     * Redistributions in binary form must reproduce the above copyright
+-#       notice, this list of conditions and the following disclaimer in the
+-#       documentation and/or other materials provided with the distribution.
+-#     * Neither the name of The Linux Foundation nor
+-#       the names of its contributors may be used to endorse or promote
+-#       products derived from this software without specific prior written
+-#       permission.
+-#
+-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-# IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+-# NON-INFRINGEMENT ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+-# CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+-# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-#
+ 
+ on early-init
++    # Load charging & power modules
+     insmod /lib/modules/mmi_annotate.ko
+     insmod /lib/modules/mmi_info.ko
+     insmod /lib/modules/cw2217b_fg_mmi.ko
+@@ -43,6 +20,11 @@ on early-init
+     insmod /lib/modules/tcpc_aw35616.ko
+     insmod /lib/modules/rt_pd_manager.ko
+ 
++on boot
++    # Load touch driver modules (Ilitek / Goodix / FocalTech)
++    exec u:r:modprobe:s0 -- /system/bin/modprobe -a -d /vendor_dlkm/lib/modules ilitek_v3_mmi focaltech_touch goodix_core
++    exec u:r:modprobe:s0 -- /system/bin/modprobe -a -d /vendor/lib/modules ilitek_v3_mmi focaltech_touch goodix_core
++
+ on init
+     mkdir /config
+     mount configfs none /config

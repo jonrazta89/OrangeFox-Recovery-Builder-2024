@@ -15,23 +15,23 @@ on:
       DEVICE_TREE:
         description: 'Custom Recovery Tree'
         required: true
-        default: 'https://github.com/kinguser981/android_device_xiaomi_marble-OFRP'
+        default: 'https://github.com/twrpdtgen/android_device_motorola_fogona'
       DEVICE_TREE_BRANCH:
         description: 'Custom Recovery Tree Branch'
         required: true
-        default: 'fox_12.1'
+        default: 'main'
       DEVICE_PATH:
         description: 'Specify your device path.'
         required: true
-        default: 'device/xiaomi/marble'
+        default: 'device/motorola/fogona'
       DEVICE_NAME:
         description: 'Specify your Device Codename.'
         required: true
-        default: 'marble'
+        default: 'fogona'
       BUILD_TARGET:
         description: 'Specify your Build Target'
         required: true
-        default: 'recovery'
+        default: 'vendorboot'
         type: choice
         options:
         - boot
@@ -106,6 +106,24 @@ jobs:
         git clone ${{ github.event.inputs.DEVICE_TREE }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.DEVICE_PATH }}
         cd ${{ github.event.inputs.DEVICE_PATH }}
         echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
+
+    - name: Apply Device Patches
+      run: |
+        if [ -d "${GITHUB_WORKSPACE}/patches/${{ github.event.inputs.DEVICE_NAME }}" ]; then
+          echo "Applying custom patches for ${{ github.event.inputs.DEVICE_NAME }}..."
+          TARGET_DIR="${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/${{ github.event.inputs.DEVICE_PATH }}"
+          if [ -f "${GITHUB_WORKSPACE}/patches/${{ github.event.inputs.DEVICE_NAME }}/BoardConfig.mk" ]; then
+            cp -v "${GITHUB_WORKSPACE}/patches/${{ github.event.inputs.DEVICE_NAME }}/BoardConfig.mk" "${TARGET_DIR}/BoardConfig.mk"
+          fi
+          if [ -f "${GITHUB_WORKSPACE}/patches/${{ github.event.inputs.DEVICE_NAME }}/recovery.fstab" ]; then
+            cp -v "${GITHUB_WORKSPACE}/patches/${{ github.event.inputs.DEVICE_NAME }}/recovery.fstab" "${TARGET_DIR}/recovery.fstab"
+          fi
+          if [ -f "${GITHUB_WORKSPACE}/patches/${{ github.event.inputs.DEVICE_NAME }}/init.recovery.qcom.rc" ]; then
+            mkdir -p "${TARGET_DIR}/recovery/root"
+            cp -v "${GITHUB_WORKSPACE}/patches/${{ github.event.inputs.DEVICE_NAME }}/init.recovery.qcom.rc" "${TARGET_DIR}/recovery/root/init.recovery.qcom.rc"
+          fi
+          echo "Patches applied successfully."
+        fi
 
     - name: Check Manifest Branch
       uses: haya14busa/action-cond@v1
