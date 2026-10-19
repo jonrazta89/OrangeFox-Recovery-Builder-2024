@@ -19,7 +19,7 @@ on:
       DEVICE_TREE_BRANCH:
         description: 'Custom Recovery Tree Branch'
         required: true
-        default: 'main'
+        default: 'fogona-user-13-U1TFS34.100-35-5-1-54a917-release-keys'
       DEVICE_PATH:
         description: 'Specify your device path.'
         required: true
@@ -103,7 +103,12 @@ jobs:
     - name: Clone Device Tree
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
-        git clone ${{ github.event.inputs.DEVICE_TREE }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.DEVICE_PATH }}
+        if [ -n "${{ github.event.inputs.DEVICE_TREE_BRANCH }}" ]; then
+          git clone ${{ github.event.inputs.DEVICE_TREE }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.DEVICE_PATH }} || \
+          git clone ${{ github.event.inputs.DEVICE_TREE }} ./${{ github.event.inputs.DEVICE_PATH }}
+        else
+          git clone ${{ github.event.inputs.DEVICE_TREE }} ./${{ github.event.inputs.DEVICE_PATH }}
+        fi
         cd ${{ github.event.inputs.DEVICE_PATH }}
         echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
